@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digitronix - {% if mode == 'register' %}Create account{% elif mode == 'forgot' %}Forgot password{% elif mode == 'reset' %}Reset password{% else %}Sign in{% endif %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="auth-body">
+  <div class="auth-card">
+    <div class="brand">Digi<span>tronix</span></div>
+    <p class="tag">
+      {% if mode == 'register' %}Create your account
+      {% elif mode == 'forgot' %}Enter your email to reset your password
+      {% elif mode == 'reset' %}Choose a new password
+      {% else %}Smart electricity meter reading{% endif %}
+    </p>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      {% if mode == 'register' %}
+        <label>Full name</label>
+        <input type="text" name="name" required>
+      {% endif %}
+      {% if mode in ('login', 'register', 'forgot') %}
+        <label>Email</label>
+        <input type="email" name="email" required>
+      {% endif %}
+      {% if mode in ('login', 'register', 'reset') %}
+        <label>{% if mode == 'reset' %}New password{% else %}Password{% endif %}</label>
+        <input type="password" name="password" required>
+      {% endif %}
+      {% if mode in ('register', 'reset') %}
+        <div class="hint">At least 8 characters, with an uppercase letter, a lowercase letter, a number and a special character (for example @ . # !).</div>
+        <label>Confirm password</label>
+        <input type="password" name="confirm" required>
+      {% endif %}
+      {% if mode == 'login' %}
+        <div class="hint" style="text-align:right"><a href="{{ url_for('forgot') }}" style="color:#2563eb;text-decoration:none">Forgot password?</a></div>
+      {% endif %}
+      <button class="btn full" type="submit">
+        {% if mode == 'register' %}Create account{% elif mode == 'forgot' %}Send reset link{% elif mode == 'reset' %}Reset password{% else %}Sign in{% endif %}
+      </button>
+    </form>
+    <div class="switch">
+      {% if mode == 'register' %}Already have an account? <a href="{{ url_for('login') }}">Sign in</a>
+      {% elif mode in ('forgot', 'reset') %}<a href="{{ url_for('login') }}">Back to sign in</a>
+      {% else %}New to Digitronix? <a href="{{ url_for('register') }}">Create an account</a>{% endif %}
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digitronix - Advisor</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.nav-links a{color:#cbd5e1;text-decoration:none;font-size:14px}
+.nav-links a.active{color:#fff;font-weight:600}
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.form-grid select,.form-grid input,.inline input{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;background:#fff}
+.inline{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.inline .grow{flex:1;min-width:200px}
+.msg{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:14px;line-height:1.6;background:#eff6ff;color:#1e3a8a}
+.msg.over{background:#fee2e2;color:#991b1b}
+.msg.ok{background:#dcfce7;color:#166534}
+.tip{border-left:4px solid #2563eb;background:#f8fafc;padding:12px 14px;border-radius:8px;margin-bottom:12px;font-size:14px;line-height:1.6}
+.del{background:none;border:none;color:#dc2626;cursor:pointer;font-weight:600}
+@media(max-width:760px){.form-grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="brand">Digi<span>tronix</span></div>
+  <div class="nav-right">
+    <div class="nav-links"><a href="{{ url_for('dashboard') }}">Dashboard</a> &nbsp; <a class="active" href="{{ url_for('advisor.advisor_page') }}">Advisor</a></div>
+    <span class="user">{{ name }}</span>
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <button class="btn ghost" type="submit">Sign out</button>
+    </form>
+  </div>
+</header>
+<main class="container">
+  <div class="card">
+    <h3>Monthly budget</h3>
+    <div class="inline">
+      <div class="grow"><label>Your monthly electricity budget (Rs)</label><input id="budget" type="number" min="100" step="any"></div>
+      <button class="btn" id="saveBudget" type="button">Save budget</button>
+    </div>
+    <div class="msg" id="budgetMsg">Set your monthly budget to get alerts when your bill goes above it.</div>
+  </div>
+
+  <div class="card">
+    <h3>Add an appliance</h3>
+    <div class="form-grid">
+      <div><label>Appliance</label><select id="type"></select></div>
+      <div><label>Type or size</label><select id="variant"></select></div>
+      <div><label>Brand</label><select id="brand"></select></div>
+      <div><label>Power (watts)</label><input id="watts" type="number" min="1" step="any"></div>
+      <div><label>Quantity</label><input id="qty" type="number" min="1" value="1"></div>
+      <div><label>Hours used per day</label><input id="hours" type="number" min="0" max="24" step="any"></div>
+    </div>
+    <div class="actions"><button class="btn" id="addBtn" type="button">Add appliance</button></div>
+    <div class="meta">Power values are typical averages. Check the label on your appliance for its exact power and edit it if needed.</div>
+    <div class="status error" id="addErr"></div>
+  </div>
+
+  <div class="card">
+    <h3>Your appliances</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Appliance</th><th>Watts</th><th>Qty</th><th>Hours/day</th><th>Units/month</th><th>Est. cost (Rs)</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="msg" id="summary" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h3>Advice to reduce your bill</h3>
+    <div id="tips"><div class="meta">Add your appliances to get advice.</div></div>
+  </div>
+</main>
+
+<script>
+var CSRF = "{{ csrf_token }}";
+var $ = function (id) { return document.getElementById(id); };
+var catalog = {};
+
+function fmt(n) { return Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+async function post(url, body) {
+  var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF": CSRF }, body: JSON.stringify(body) });
+  return r.json();
+}
+function fill(sel, items) {
+  sel.innerHTML = "";
+  items.forEach(function (t) { var o = document.createElement("option"); o.value = t.value; o.textContent = t.label; sel.appendChild(o); });
+}
+function onType() {
+  var c = catalog[$("type").value];
+  fill($("variant"), c.variants.map(function (v) { return { value: v.name, label: v.name + " (" + v.watts + " W)" }; }));
+  fill($("brand"), c.brands.map(function (b) { return { value: b, label: b }; }));
+  $("hours").value = c.hours;
+  onVariant();
+}
+function onVariant() {
+  var c = catalog[$("type").value];
+  var v = c.variants.filter(function (x) { return x.name === $("variant").value; })[0];
+  $("watts").value = v ? v.watts : "";
+}
+$("type").addEventListener("change", onType);
+$("variant").addEventListener("change", onVariant);
+
+async function loadCatalog() {
+  catalog = await (await fetch("/advisor/api/catalog")).json();
+  fill($("type"), Object.keys(catalog).map(function (k) { return { value: k, label: k }; }));
+  onType();
+}
+
+$("saveBudget").addEventListener("click", async function () {
+  var d = await post("/advisor/api/budget", { budget: $("budget").value });
+  if (!d.ok) { alert(d.message); return; }
+  loadState();
+});
+
+$("addBtn").addEventListener("click", async function () {
+  $("addErr").textContent = "";
+  var d = await post("/advisor/api/appliance", {
+    type: $("type").value, variant: $("variant").value, brand: $("brand").value,
+    watts: $("watts").value, qty: $("qty").value, hours: $("hours").value
+  });
+  if (!d.ok) { $("addErr").textContent = d.message; return; }
+  loadState();
+});
+
+async function removeAppliance(id) {
+  await post("/advisor/api/appliance/delete", { id: id });
+  loadState();
+}
+
+function budgetMessage(s, est, total) {
+  var box = $("budgetMsg"), t = "", cls = "msg";
+  if (!s.budget) {
+    t = "Set your monthly budget to get alerts when your bill goes above it.";
+  } else {
+    if (s.state === "over") {
+      cls = "msg over";
+      t = "Over budget: your latest estimated bill is Rs " + fmt(s.bill) + ", which is Rs " + fmt(s.diff) + " above your budget of Rs " + fmt(s.budget) + ". ";
+    } else if (s.state === "within") {
+      cls = "msg ok";
+      t = "Within budget: your latest estimated bill is Rs " + fmt(s.bill) + " against your budget of Rs " + fmt(s.budget) + ". ";
+    } else {
+      t = "Upload two meter readings on the dashboard to compare your bill with your budget. ";
+    }
+    t += "Your budget covers about " + fmt(s.units_allowed) + " units per month.";
+  }
+  box.className = cls;
+  box.textContent = t;
+}
+
+async function loadState() {
+  var d = await (await fetch("/advisor/api/state")).json();
+  if (!d.ok) return;
+  if (d.budget) $("budget").value = d.budget;
+  budgetMessage(d.status, d.estimate, d.total_kwh);
+
+  $("rows").innerHTML = d.appliances.length ? d.appliances.map(function (a) {
+    return "<tr><td>" + a.type + " (" + a.variant + ", " + a.brand + ")</td><td>" + fmt(a.watts) + "</td><td>" + a.qty +
+      "</td><td>" + fmt(a.hours) + "</td><td>" + fmt(a.kwh_month) + "</td><td>" + fmt(a.cost) +
+      '</td><td><button class="del" onclick="removeAppliance(' + a.id + ')">Remove</button></td></tr>';
+  }).join("") : '<tr><td colspan="7" class="empty">No appliances added yet.</td></tr>';
+
+  var sm = $("summary");
+  if (d.estimate) {
+    var t = "Your appliances use about " + fmt(d.total_kwh) + " units per month, which is an estimated bill of Rs " + fmt(d.estimate.amount) + ".";
+    sm.className = "msg";
+    if (d.budget) {
+      if (d.estimate.amount > d.budget) { sm.className = "msg over"; t += " This is Rs " + fmt(d.estimate.amount - d.budget) + " above your budget."; }
+      else { sm.className = "msg ok"; t += " This is within your budget."; }
+    }
+    sm.textContent = t; sm.style.display = "block";
+  } else { sm.style.display = "none"; }
+
+  var tips = $("tips");
+  tips.innerHTML = "";
+  if (!d.tips.length) { tips.innerHTML = '<div class="meta">Add your appliances to get advice.</div>'; return; }
+  d.tips.forEach(function (x) {
+    var el = document.createElement("div");
+    el.className = "tip";
+    var b = document.createElement("b"); b.textContent = x.title;
+    var p = document.createElement("div"); p.textContent = x.text;
+    el.appendChild(b); el.appendChild(p);
+    if (x.saving_rs > 0) {
+      var s = document.createElement("div");
+      s.textContent = "Using it 1 hour less per day saves about " + fmt(x.saving_units) + " units and Rs " + fmt(x.saving_rs) + " per month.";
+      s.style.fontWeight = "600";
+      el.appendChild(s);
+    }
+    tips.appendChild(el);
+  });
+}
+
+loadCatalog().then(loadState);
+</script>
+</body>
+</html>
